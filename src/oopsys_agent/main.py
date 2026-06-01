@@ -37,6 +37,10 @@ async def lifespan(app: FastAPI):
 
     await _bootstrap_identity(container, runtime, configuration)
     await logger.ainfo("Agent identity ready", agent_id=runtime.agent_id)
+    if not configuration.agent.token:
+        await logger.awarning(
+            "AGENT__TOKEN is not set; outbound delivery to oopsys-server is disabled until configured",
+        )
 
     gateway: NatsGateway = await container.get(NatsGateway)
     await gateway.start()

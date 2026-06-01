@@ -1,6 +1,4 @@
-import asyncio
 import contextlib
-import logging
 from typing import Any
 
 from faststream import AckPolicy
@@ -13,7 +11,7 @@ from oopsys_agent.configuration.config import NatsModel
 from oopsys_agent.configuration.loggers import Loggers
 from oopsys_agent.database.base import utc_now
 from oopsys_agent.runtime import AppRuntime
-from oopsys_agent.services.server_client import ServerClient
+from oopsys_agent.services.server_client import ServerAuthError, ServerClient, ServerDeliveryError
 
 logger = getLogger(Loggers.publisher.name)
 
@@ -35,6 +33,8 @@ class NatsGateway:
         self._runtime = runtime
         self._retry_base = retry_base
         self._broker: NatsBroker | None = None
+        self._forward_no_token_logged = False
+        self._forward_auth_logged = False
         self._forward_unreachable_logged = False
 
     def _stream(self) -> JStream:
@@ -48,7 +48,7 @@ class NatsGateway:
         broker = NatsBroker(
             self._config.servers,
             connect_timeout=int(self._config.connect_timeout),
-            log_level=logging.WARNING,
+            logger=None,
         )
         stream = self._stream()
         broker.publisher(f"{self._config.subject_prefix}.agents._declare", stream=stream)
@@ -56,15 +56,34 @@ class NatsGateway:
             f"{self._config.subject_prefix}.agents.*.>",
             stream=stream,
             durable=self._config.durable,
+            pull_sub=True,
             ack_policy=AckPolicy.NACK_ON_ERROR,
             config=ConsumerConfig(ack_wait=self._config.ack_wait, max_deliver=-1),
         )(self._forward)
         return broker
 
     async def _forward(self, body: dict[str, Any]) -> None:
+        if not self._server_client.delivery_enabled:
+            self._runtime.server_reachable = False
+            if not self._forward_no_token_logged:
+                await logger.awarning(
+                    "forwarding disabled: set AGENT__TOKEN in .env after `oopsys-agent token create`",
+                )
+                self._forward_no_token_logged = True
+            raise NackMessage() from None
+
         try:
             await self._server_client.send(body)
-        except Exception as exc:
+        except ServerAuthError as exc:
+            self._runtime.server_reachable = False
+            if not self._forward_auth_logged:
+                await logger.awarning(
+                    "token rejected by server; bind the same token in Agents UI",
+                    reason=str(exc),
+                )
+                self._forward_auth_logged = True
+            raise NackMessage() from None
+        except (ServerDeliveryError, Exception) as exc:
             was_reachable = self._runtime.server_reachable
             self._runtime.server_reachable = False
             if was_reachable or not self._forward_unreachable_logged:
@@ -73,11 +92,12 @@ class NatsGateway:
                     reason=str(exc),
                 )
                 self._forward_unreachable_logged = True
-            await asyncio.sleep(self._retry_base)
             raise NackMessage() from None
         if not self._runtime.server_reachable:
             await logger.ainfo("server reachable again; forwarding resumed")
-            self._forward_unreachable_logged = False
+        self._forward_no_token_logged = False
+        self._forward_auth_logged = False
+        self._forward_unreachable_logged = False
         self._runtime.server_reachable = True
         self._runtime.last_forwarded_at = utc_now()
 

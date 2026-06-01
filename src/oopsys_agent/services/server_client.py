@@ -9,6 +9,10 @@ class ServerDeliveryError(RuntimeError):
     pass
 
 
+class ServerAuthError(ServerDeliveryError):
+    """Server rejected agent credentials (token missing, revoked, or not bound)."""
+
+
 class ServerClient:
     def __init__(
         self, server: ServerModel, agent: AgentModel, *, transport: httpx.AsyncBaseTransport | None = None
@@ -16,6 +20,10 @@ class ServerClient:
         self._server = server
         self._agent = agent
         self._transport = transport
+
+    @property
+    def delivery_enabled(self) -> bool:
+        return bool(self._agent.token)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -30,5 +38,7 @@ class ServerClient:
                 json=envelope,
                 headers=self._headers(),
             )
+        if response.status_code in {401, 403}:
+            raise ServerAuthError(f"server responded {response.status_code}")
         if response.status_code >= 400:
             raise ServerDeliveryError(f"server responded {response.status_code}")

@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from oopsys_agent.configuration.config import AgentModel, ServerModel
-from oopsys_agent.services.server_client import ServerClient, ServerDeliveryError
+from oopsys_agent.services.server_client import ServerAuthError, ServerClient, ServerDeliveryError
 
 
 def _client(handler, *, token: str | None = None) -> ServerClient:
@@ -33,3 +33,16 @@ async def test_send_raises_on_server_error() -> None:
 
     with pytest.raises(ServerDeliveryError):
         await _client(handler).send({"source": "server"})
+
+
+async def test_send_raises_auth_error_on_unauthorized() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(401)
+
+    with pytest.raises(ServerAuthError):
+        await _client(handler, token="secret").send({"source": "projects"})
+
+
+async def test_delivery_disabled_without_token() -> None:
+    assert _client(lambda _: httpx.Response(202)).delivery_enabled is False
+    assert _client(lambda _: httpx.Response(202), token="x").delivery_enabled is True
