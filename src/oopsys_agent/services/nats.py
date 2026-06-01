@@ -1,8 +1,10 @@
 import asyncio
 import contextlib
+import logging
 from typing import Any
 
 from faststream import AckPolicy
+from faststream.exceptions import NackMessage
 from faststream.nats import JStream, NatsBroker
 from nats.js.api import ConsumerConfig
 from structlog import getLogger
@@ -33,6 +35,7 @@ class NatsGateway:
         self._runtime = runtime
         self._retry_base = retry_base
         self._broker: NatsBroker | None = None
+        self._forward_unreachable_logged = False
 
     def _stream(self) -> JStream:
         return JStream(
@@ -42,7 +45,11 @@ class NatsGateway:
         )
 
     def _build_broker(self) -> NatsBroker:
-        broker = NatsBroker(self._config.servers, connect_timeout=int(self._config.connect_timeout))
+        broker = NatsBroker(
+            self._config.servers,
+            connect_timeout=int(self._config.connect_timeout),
+            log_level=logging.WARNING,
+        )
         stream = self._stream()
         broker.publisher(f"{self._config.subject_prefix}.agents._declare", stream=stream)
         broker.subscriber(
@@ -58,10 +65,19 @@ class NatsGateway:
         try:
             await self._server_client.send(body)
         except Exception as exc:
+            was_reachable = self._runtime.server_reachable
             self._runtime.server_reachable = False
-            await logger.awarning("forward to server failed; will retry", reason=str(exc))
+            if was_reachable or not self._forward_unreachable_logged:
+                await logger.awarning(
+                    "server unreachable; messages stay in queue and will retry",
+                    reason=str(exc),
+                )
+                self._forward_unreachable_logged = True
             await asyncio.sleep(self._retry_base)
-            raise
+            raise NackMessage() from None
+        if not self._runtime.server_reachable:
+            await logger.ainfo("server reachable again; forwarding resumed")
+            self._forward_unreachable_logged = False
         self._runtime.server_reachable = True
         self._runtime.last_forwarded_at = utc_now()
 
