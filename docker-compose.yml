@@ -1,0 +1,42 @@
+services:
+  agent:
+    build: .
+    image: oopsys-agent:latest
+    container_name: oopsys-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - oopsys-agent-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - oopsys
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: oopsys-nats
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    networks:
+      - oopsys
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  oopsys-agent-data:
+
+networks:
+  oopsys:
+    name: oopsys-net

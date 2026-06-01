@@ -1,0 +1,99 @@
+[project]
+name = "oopsys-agent"
+version = "0.1.0"
+description = "oops, system crashed :) — local server agent"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiodocker>=0.24.0",
+    "aiosqlite>=0.21.0",
+    "dishka>=1.10.1",
+    "fastapi>=0.136.3",
+    "faststream[nats]>=0.5.0",
+    "kitstructlog>=0.1.2",
+    "psutil>=7.0.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "sqlalchemy>=2.0.50",
+    "structlog>=25.5.0",
+    "uvicorn>=0.48.0",
+]
+
+[project.scripts]
+oopsys-agent = "oopsys_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oopsys_agent"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "examples"]
+skips = ["B105"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/units"]
+addopts = "-p no:warnings"
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+indent-width = 4
+include = ["*.py", "*.pyi", "**/pyproject.toml"]
+exclude = ["tests", "examples"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "ARG", "ANN",
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+    "D200", "D203", "D205", "D211", "D212", "D400", "D401", "D413", "D415", "D417", "D419",
+    "COM812",
+    "E501", "EM101", "EM102",
+    "RUF001", "RUF002", "RUF003", "RUF006",
+    "RET505",
+    "TC001", "TC003",
+    "TRY003", "TRY300", "TRY301", "TRY400",
+    "PYI013", "PYI036",
+    "PIE790",
+    "PLR0911", "PLR0913", "PLR0915", "PLR1704", "PLR2004",
+    "PT018",
+    "G004",
+    "INP001",
+    "UP007", "UP042",
+    "A002",
+    "ASYNC109",
+    "B008",
+    "BLE001",
+    "C901",
+    "DTZ003",
+    "FAST001", "FAST002",
+    "FBT003",
+    "PLC0415",
+    "PLW0603",
+    "S105",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["TID252", "PLR2004", "S101", "SLF001"]
+"examples/**/*.py" = ["T201"]
+"src/oopsys_agent/cli.py" = ["T201"]
+
+[tool.ruff.lint.isort]
+no-lines-before = ["local-folder"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "httpx>=0.28.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.14",
+]

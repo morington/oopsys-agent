@@ -1,0 +1,21 @@
+services:
+  parser:
+    build: .
+    image: oopsys-example-parser:latest
+    container_name: oopsys-example-parser
+    restart: unless-stopped
+    environment:
+      OOPSYS_IS_DEVELOPMENT: "true"
+      OOPSYS_SERVICE_NAME: "demo-parser"
+      OOPSYS_RERAISE: "false"
+      OOPSYS_AGENT__ENABLED: "true"
+      OOPSYS_AGENT__HOST: "oopsys-agent"
+      OOPSYS_AGENT__PORT: "8080"
+      OOPSYS_AGENT__PATH: "/reports"
+    networks:
+      - oopsys
+
+networks:
+  oopsys:
+    external: true
+    name: oopsys-net
