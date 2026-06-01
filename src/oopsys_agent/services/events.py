@@ -1,42 +1,35 @@
-from datetime import datetime
-
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oopsys_agent.database import (
     AgentFaultRecord,
     ContainerStateRecord,
     ErrorReportRecord,
-    OutboxRecord,
     ServerMetricRecord,
-    utc_now,
 )
 from oopsys_agent.domain import (
     AgentFault,
     ContainerState,
     Envelope,
     ErrorReport,
-    OutboxStatus,
     ServerMetrics,
     Source,
     build_subject,
 )
+from oopsys_agent.services.nats import NatsGateway
 
 
-class OutboxService:
-    def __init__(self, session: AsyncSession, *, subject_prefix: str) -> None:
+class EventService:
+    """Persist an event to local history (SQLite) and enqueue it for delivery."""
+
+    def __init__(self, session: AsyncSession, gateway: NatsGateway, *, subject_prefix: str) -> None:
         self._session = session
+        self._gateway = gateway
         self._prefix = subject_prefix
 
-    def _enqueue(self, agent_id: str, source: Source, payload: dict) -> OutboxRecord:
+    async def _enqueue(self, agent_id: str, source: Source, payload: dict) -> None:
         envelope = Envelope(agent_id=agent_id, source=source, payload=payload)
-        record = OutboxRecord(
-            subject=build_subject(self._prefix, agent_id, source),
-            source=source,
-            payload=envelope.model_dump(mode="json"),
-        )
-        self._session.add(record)
-        return record
+        subject = build_subject(self._prefix, agent_id, source)
+        await self._gateway.publish(subject, envelope.model_dump(mode="json"))
 
     async def record_error_report(self, report: ErrorReport, *, agent_id: str) -> None:
         self._session.add(
@@ -51,8 +44,8 @@ class OutboxService:
                 occurred_at=report.timestamp,
             )
         )
-        self._enqueue(agent_id, Source.PROJECTS, report.model_dump(mode="json"))
         await self._session.commit()
+        await self._enqueue(agent_id, Source.PROJECTS, report.model_dump(mode="json"))
 
     async def record_server_metrics(self, metrics: ServerMetrics, *, agent_id: str) -> None:
         self._session.add(
@@ -70,8 +63,8 @@ class OutboxService:
                 captured_at=metrics.captured_at,
             )
         )
-        self._enqueue(agent_id, Source.SERVER, metrics.model_dump(mode="json"))
         await self._session.commit()
+        await self._enqueue(agent_id, Source.SERVER, metrics.model_dump(mode="json"))
 
     async def record_container_state(self, state: ContainerState, *, agent_id: str) -> None:
         self._session.add(
@@ -93,8 +86,8 @@ class OutboxService:
                 captured_at=state.captured_at,
             )
         )
-        self._enqueue(agent_id, Source.DOCKER, state.model_dump(mode="json"))
         await self._session.commit()
+        await self._enqueue(agent_id, Source.DOCKER, state.model_dump(mode="json"))
 
     async def record_agent_fault(self, fault: AgentFault, *, agent_id: str) -> None:
         self._session.add(
@@ -108,36 +101,5 @@ class OutboxService:
                 occurred_at=fault.occurred_at,
             )
         )
-        self._enqueue(agent_id, Source.AGENT, fault.model_dump(mode="json"))
         await self._session.commit()
-
-    async def pending_count(self) -> int:
-        result = await self._session.execute(
-            select(func.count()).select_from(OutboxRecord).where(OutboxRecord.status == OutboxStatus.PENDING)
-        )
-        return int(result.scalar_one())
-
-    async def fetch_due(self, *, limit: int, now: datetime | None = None) -> list[OutboxRecord]:
-        moment = now or utc_now()
-        result = await self._session.execute(
-            select(OutboxRecord)
-            .where(
-                OutboxRecord.status == OutboxStatus.PENDING,
-                (OutboxRecord.next_retry_at.is_(None)) | (OutboxRecord.next_retry_at <= moment),
-            )
-            .order_by(OutboxRecord.created_at)
-            .limit(limit)
-        )
-        return list(result.scalars().all())
-
-    async def mark_delivered(self, record: OutboxRecord) -> None:
-        record.status = OutboxStatus.DELIVERED
-        record.delivered_at = utc_now()
-        record.last_error = None
-        await self._session.commit()
-
-    async def mark_retry(self, record: OutboxRecord, *, error: str, next_retry_at: datetime) -> None:
-        record.attempts += 1
-        record.last_error = error
-        record.next_retry_at = next_retry_at
-        await self._session.commit()
+        await self._enqueue(agent_id, Source.AGENT, fault.model_dump(mode="json"))

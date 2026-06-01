@@ -2,7 +2,20 @@
 
 > oops, system crashed :)
 
-Local agent for a server: accepts error reports from [oopsys-python](https://pypi.org/project/oopsys-python/), collects host and Docker metrics, stores history in SQLite, and publishes to NATS JetStream (with a local outbox).
+Local agent for a server: accepts error reports from [oopsys-python](https://pypi.org/project/oopsys-python/), collects host and Docker metrics, stores history in SQLite, and reliably ships everything to the central `oopsys-server` over HTTP.
+
+The agent **never talks to the server directly from the hot path**. Every event is written into a local NATS JetStream queue first; a worker drains that queue and `POST`s to the server. If the server is down, the message stays in the queue and is retried later — nothing is lost.
+
+```
+oopsys-python ──HTTP /reports──▶ agent ──enqueue──▶ NATS JetStream (local, durable)
+                                                          │
+                                              forwarder worker (consumer)
+                                                          │ HTTP POST (ack on 2xx, nack+retry otherwise)
+                                                          ▼
+                                                    oopsys-server
+
+oopsys-server ──HTTP /health, /usage (Bearer)──▶ agent
+```
 
 ---
 
@@ -13,7 +26,8 @@ Local agent for a server: accepts error reports from [oopsys-python](https://pyp
 | Projects | `POST /reports` — `ErrorReport` from apps (no auth; trusted Docker network) |
 | Host | CPU, memory, network, load (psutil) |
 | Docker | All containers on the host daemon (via mounted socket) |
-| Delivery | SQLite history + outbox → NATS JetStream; ack before mark delivered |
+| Queue | Events → local NATS JetStream (durable); survives restarts |
+| Delivery | Forwarder worker consumes the queue and `POST`s to the server over HTTP; server down → nack → retried |
 | Self | Agent faults → `source=agent` (separate from project errors) |
 | Server API | `GET /ping` (public), `POST /health` and `POST /usage` (Bearer token) |
 
@@ -38,9 +52,11 @@ uv run oopsys-agent run
 
 ---
 
-## NATS subjects
+## Queue (NATS subjects)
 
-Prefix: `NATS__SUBJECT_PREFIX` (default `oopsys`). Stream: `NATS__STREAM` (default `OOPSYS`).
+NATS is the agent's **local, durable buffer** — not a transport to the server. The forwarder worker consumes these subjects and delivers the payload to the server over HTTP.
+
+Prefix: `NATS__SUBJECT_PREFIX` (default `oopsys`). Stream: `NATS__STREAM` (default `OOPSYS`). Consumer: `NATS__DURABLE`.
 
 | Subject | Source | Payload |
 |---------|--------|---------|
@@ -49,9 +65,9 @@ Prefix: `NATS__SUBJECT_PREFIX` (default `oopsys`). Stream: `NATS__STREAM` (defau
 | `oopsys.agents.<agent_id>.docker` | Containers | `ContainerState` |
 | `oopsys.agents.<agent_id>.agent` | Agent faults | `AgentFault` |
 
-Envelope: `{schema_version, agent_id, source, occurred_at, payload}`.
+Envelope (what the server receives): `{schema_version, agent_id, source, occurred_at, payload}`.
 
-Errors are published immediately; metrics on `INTERVALS__METRICS_SECONDS`.
+Errors are enqueued immediately; metrics on `INTERVALS__METRICS_SECONDS`.
 
 ---
 
@@ -66,9 +82,15 @@ Errors are published immediately; metrics on `INTERVALS__METRICS_SECONDS`.
 
 ---
 
+## Delivery to the server
+
+The forwarder posts each envelope to `SERVER__URL` + `SERVER__INGEST_PATH` with `Authorization: Bearer <AGENT__TOKEN>`. On HTTP `2xx` the message is acked and dropped from the queue; on any error it is nacked and retried (`max_deliver` is unlimited, redelivery after `NATS__ACK_WAIT`).
+
+---
+
 ## Token (server ↔ agent)
 
-Identifies the **agent**, not a user. One token can be linked from several server accounts. Only the hash is stored locally.
+Identifies the **agent**, not a user. One token can be linked from several server accounts. The agent stores only the token hash (used to verify incoming `POST /health` / `POST /usage` calls). For outbound delivery the forwarder uses the plaintext `AGENT__TOKEN` from the environment as a Bearer credential.
 
 ```bash
 docker compose exec agent oopsys-agent token create --label my-server

@@ -8,7 +8,6 @@ from oopsys_agent.database.models import (
     AgentIdentity,
     ContainerStateRecord,
     ErrorReportRecord,
-    OutboxRecord,
     ServerMetricRecord,
 )
 
@@ -18,7 +17,6 @@ __all__ = [
     "Base",
     "ContainerStateRecord",
     "ErrorReportRecord",
-    "OutboxRecord",
     "ServerMetricRecord",
     "create_all",
     "utc_now",

@@ -10,6 +10,7 @@ dependencies = [
     "dishka>=1.10.1",
     "fastapi>=0.136.3",
     "faststream[nats]>=0.5.0",
+    "httpx>=0.28.0",
     "kitstructlog>=0.1.2",
     "psutil>=7.0.0",
     "pydantic>=2.13.4",
@@ -78,7 +79,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["TID252", "PLR2004", "S101", "SLF001"]
+"tests/**/*.py" = ["TID252", "PLR2004", "S101", "S106", "SLF001"]
 "examples/**/*.py" = ["T201"]
 "src/oopsys_agent/cli.py" = ["T201"]
 
@@ -91,7 +92,6 @@ ban-relative-imports = "parents"
 [dependency-groups]
 dev = [
     "bandit>=1.9.4",
-    "httpx>=0.28.0",
     "pre-commit>=4.6.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",

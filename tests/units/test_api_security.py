@@ -14,7 +14,6 @@ from oopsys_agent.services import TokenService
 @pytest_asyncio.fixture
 async def client_and_token(monkeypatch, tmp_path) -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     monkeypatch.setenv("SQLITE__PATH", str(tmp_path / "agent.db"))
-    monkeypatch.setenv("NATS__ENABLED", "false")
 
     runtime = AppRuntime(agent_id="test-agent")
     container = build_container(FastapiProvider(), context={AppRuntime: runtime})

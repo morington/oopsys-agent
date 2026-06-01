@@ -24,19 +24,27 @@ class SqliteModel(BaseModel):
 
 
 class NatsModel(BaseModel):
-    enabled: bool = Field(default=True)
     servers: list[str] = Field(default_factory=lambda: ["nats://localhost:4222"])
     stream: str = Field(default="OOPSYS")
     subject_prefix: str = Field(default="oopsys")
+    durable: str = Field(default="oopsys-forwarder")
     connect_timeout: float = Field(default=5.0, gt=0)
     publish_timeout: float = Field(default=5.0, gt=0)
+    ack_wait: float = Field(default=60.0, gt=0)
+
+
+class ServerModel(BaseModel):
+    url: str = Field(default="http://oopsys-server:8000")
+    ingest_path: str = Field(default="/agents/ingest")
+    timeout: float = Field(default=10.0, gt=0)
+
+    def ingest_url(self) -> str:
+        return f"{self.url.rstrip('/')}{self.ingest_path}"
 
 
 class IntervalsModel(BaseModel):
     metrics_seconds: float = Field(default=30.0, gt=0)
-    publish_seconds: float = Field(default=5.0, gt=0)
     retry_base_seconds: float = Field(default=5.0, gt=0)
-    retry_max_seconds: float = Field(default=300.0, gt=0)
 
 
 class AgentModel(BaseModel):
@@ -50,6 +58,7 @@ class Configuration(BaseSettings):
     application: ApplicationModel = ApplicationModel()
     sqlite: SqliteModel = SqliteModel()
     nats: NatsModel = NatsModel()
+    server: ServerModel = ServerModel()
     intervals: IntervalsModel = IntervalsModel()
     agent: AgentModel = AgentModel()
 

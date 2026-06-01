@@ -5,7 +5,7 @@ from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from oopsys_agent.database.base import Base, utc_now
-from oopsys_agent.domain.enums import OutboxStatus, Severity, Source
+from oopsys_agent.domain.enums import Severity
 
 
 class AgentIdentity(Base):
@@ -83,18 +83,3 @@ class AgentFaultRecord(Base):
     traceback: Mapped[str] = mapped_column(Text)
     severity: Mapped[Severity] = mapped_column(String(16), default=Severity.ERROR)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-
-
-class OutboxRecord(Base):
-    __tablename__ = "outbox"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    subject: Mapped[str] = mapped_column(String(255))
-    source: Mapped[Source] = mapped_column(String(16))
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
-    status: Mapped[OutboxStatus] = mapped_column(String(16), default=OutboxStatus.PENDING)
-    attempts: Mapped[int] = mapped_column(Integer, default=0)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -869,6 +869,7 @@ dependencies = [
     { name = "dishka" },
     { name = "fastapi" },
     { name = "faststream", extra = ["nats"] },
+    { name = "httpx" },
     { name = "kitstructlog" },
     { name = "psutil" },
     { name = "pydantic" },
@@ -881,7 +882,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "bandit" },
-    { name = "httpx" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -895,6 +895,7 @@ requires-dist = [
     { name = "dishka", specifier = ">=1.10.1" },
     { name = "fastapi", specifier = ">=0.136.3" },
     { name = "faststream", extras = ["nats"], specifier = ">=0.5.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "kitstructlog", specifier = ">=0.1.2" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
@@ -907,7 +908,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "bandit", specifier = ">=1.9.4" },
-    { name = "httpx", specifier = ">=0.28.0" },
     { name = "pre-commit", specifier = ">=4.6.0" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },

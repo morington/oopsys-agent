@@ -13,6 +13,7 @@ from oopsys_agent.configuration import Configuration, Loggers
 from oopsys_agent.dependency_injection import build_container
 from oopsys_agent.runtime import AppRuntime
 from oopsys_agent.services import TokenService
+from oopsys_agent.services.nats import NatsGateway
 from oopsys_agent.services.scheduler import AgentScheduler
 
 logger = getLogger(Loggers.main.name)
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI):
     await _bootstrap_identity(container, runtime, configuration)
     await logger.ainfo("Agent identity ready", agent_id=runtime.agent_id)
 
+    gateway: NatsGateway = await container.get(NatsGateway)
+    await gateway.start()
+
     scheduler: AgentScheduler = await container.get(AgentScheduler)
     await scheduler.start()
 
@@ -44,6 +48,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await scheduler.stop()
+        await gateway.close()
         await container.close()
         await logger.awarning("Application shut down")
 

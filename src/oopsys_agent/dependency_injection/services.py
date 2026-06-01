@@ -4,10 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from oopsys_agent.configuration import Configuration
 from oopsys_agent.runtime import AppRuntime
 from oopsys_agent.services.docker import DockerMonitor
+from oopsys_agent.services.events import EventService
 from oopsys_agent.services.monitor import SystemMonitor
-from oopsys_agent.services.outbox import OutboxService
-from oopsys_agent.services.publisher import NatsPublisher
+from oopsys_agent.services.nats import NatsGateway
 from oopsys_agent.services.scheduler import AgentScheduler
+from oopsys_agent.services.server_client import ServerClient
 
 
 class ServiceProvider(Provider):
@@ -22,8 +23,22 @@ class ServiceProvider(Provider):
         return DockerMonitor()
 
     @provide(scope=Scope.APP)
-    def nats_publisher(self, configuration: Configuration) -> NatsPublisher:
-        return NatsPublisher(configuration.nats)
+    def server_client(self, configuration: Configuration) -> ServerClient:
+        return ServerClient(configuration.server, configuration.agent)
+
+    @provide(scope=Scope.APP)
+    def nats_gateway(
+        self,
+        configuration: Configuration,
+        server_client: ServerClient,
+        runtime: AppRuntime,
+    ) -> NatsGateway:
+        return NatsGateway(
+            configuration.nats,
+            server_client,
+            runtime,
+            retry_base=configuration.intervals.retry_base_seconds,
+        )
 
     @provide(scope=Scope.APP)
     def scheduler(
@@ -33,7 +48,7 @@ class ServiceProvider(Provider):
         session_factory: async_sessionmaker[AsyncSession],
         system: SystemMonitor,
         docker: DockerMonitor,
-        publisher: NatsPublisher,
+        gateway: NatsGateway,
     ) -> AgentScheduler:
         return AgentScheduler(
             configuration=configuration,
@@ -41,9 +56,14 @@ class ServiceProvider(Provider):
             session_factory=session_factory,
             system=system,
             docker=docker,
-            publisher=publisher,
+            gateway=gateway,
         )
 
     @provide(scope=Scope.REQUEST)
-    def outbox(self, session: AsyncSession, configuration: Configuration) -> OutboxService:
-        return OutboxService(session, subject_prefix=configuration.nats.subject_prefix)
+    def events(
+        self,
+        session: AsyncSession,
+        gateway: NatsGateway,
+        configuration: Configuration,
+    ) -> EventService:
+        return EventService(session, gateway, subject_prefix=configuration.nats.subject_prefix)
