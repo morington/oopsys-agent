@@ -33,7 +33,16 @@ class ContainerState(BaseModel):
     blk_read: int | None = None
     blk_write: int | None = None
     labels: dict[str, str] = Field(default_factory=dict)
+    ports: list[str] = Field(default_factory=list)
+    health: str | None = None
     captured_at: datetime
+
+
+class ContainerSnapshot(BaseModel):
+    """All containers on the host at a point in time."""
+
+    captured_at: datetime
+    containers: list[ContainerState] = Field(default_factory=list)
 
 
 class AgentUsage(BaseModel):

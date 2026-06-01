@@ -15,9 +15,28 @@ def _parse_started_at(raw: str | None) -> datetime | None:
     if not raw or raw.startswith("0001-01-01"):
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _format_ports(raw: dict[str, Any]) -> list[str]:
+    items: list[str] = []
+    for container_port in sorted(raw):
+        bindings = raw[container_port]
+        if not bindings:
+            items.append(container_port)
+            continue
+        for binding in bindings:
+            host_port = binding.get("HostPort")
+            if not host_port:
+                continue
+            host_ip = binding.get("HostIp") or ""
+            if host_ip and host_ip not in ("0.0.0.0", "::", ""):
+                items.append(f"{host_ip}:{host_port}→{container_port}")
+            else:
+                items.append(f"{host_port}→{container_port}")
+    return items
 
 
 def _cpu_percent(stats: dict[str, Any]) -> float | None:
@@ -129,6 +148,8 @@ class DockerMonitor:
             blk_read=blk_read,
             blk_write=blk_write,
             labels=config.get("Labels") or {},
+            ports=_format_ports((info.get("NetworkSettings") or {}).get("Ports") or {}),
+            health=(state.get("Health") or {}).get("Status"),
             captured_at=utc_now(),
         )
 

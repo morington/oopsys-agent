@@ -1,5 +1,3 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from oopsys_agent.database import (
     AgentFaultRecord,
     ContainerStateRecord,
@@ -8,6 +6,7 @@ from oopsys_agent.database import (
 )
 from oopsys_agent.domain import (
     AgentFault,
+    ContainerSnapshot,
     ContainerState,
     Envelope,
     ErrorReport,
@@ -16,12 +15,15 @@ from oopsys_agent.domain import (
     build_subject,
 )
 from oopsys_agent.services.nats import NatsGateway
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class EventService:
     """Persist an event to local history (SQLite) and enqueue it for delivery."""
 
-    def __init__(self, session: AsyncSession, gateway: NatsGateway, *, subject_prefix: str) -> None:
+    def __init__(
+        self, session: AsyncSession, gateway: NatsGateway, *, subject_prefix: str
+    ) -> None:
         self._session = session
         self._gateway = gateway
         self._prefix = subject_prefix
@@ -47,7 +49,9 @@ class EventService:
         await self._session.commit()
         await self._enqueue(agent_id, Source.PROJECTS, report.model_dump(mode="json"))
 
-    async def record_server_metrics(self, metrics: ServerMetrics, *, agent_id: str) -> None:
+    async def record_server_metrics(
+        self, metrics: ServerMetrics, *, agent_id: str
+    ) -> None:
         self._session.add(
             ServerMetricRecord(
                 cpu_percent=metrics.cpu_percent,
@@ -66,7 +70,35 @@ class EventService:
         await self._session.commit()
         await self._enqueue(agent_id, Source.SERVER, metrics.model_dump(mode="json"))
 
-    async def record_container_state(self, state: ContainerState, *, agent_id: str) -> None:
+    async def record_container_snapshot(
+        self, snapshot: ContainerSnapshot, *, agent_id: str
+    ) -> None:
+        for state in snapshot.containers:
+            self._session.add(
+                ContainerStateRecord(
+                    container_id=state.container_id,
+                    name=state.name,
+                    image=state.image,
+                    status=state.status,
+                    started_at=state.started_at,
+                    restarts=state.restarts,
+                    cpu_percent=state.cpu_percent,
+                    mem_percent=state.mem_percent,
+                    mem_usage=state.mem_usage,
+                    net_rx=state.net_rx,
+                    net_tx=state.net_tx,
+                    blk_read=state.blk_read,
+                    blk_write=state.blk_write,
+                    labels=state.labels,
+                    captured_at=state.captured_at,
+                )
+            )
+        await self._session.commit()
+        await self._enqueue(agent_id, Source.DOCKER, snapshot.model_dump(mode="json"))
+
+    async def record_container_state(
+        self, state: ContainerState, *, agent_id: str
+    ) -> None:
         self._session.add(
             ContainerStateRecord(
                 container_id=state.container_id,

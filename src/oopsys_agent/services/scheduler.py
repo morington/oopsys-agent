@@ -2,17 +2,16 @@ import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from structlog import getLogger
-
 from oopsys_agent.configuration import Configuration, Loggers
 from oopsys_agent.database.base import utc_now
-from oopsys_agent.domain import AgentFault
+from oopsys_agent.domain import AgentFault, ContainerSnapshot
 from oopsys_agent.runtime import AppRuntime
 from oopsys_agent.services.docker import DockerMonitor
 from oopsys_agent.services.events import EventService
 from oopsys_agent.services.monitor import SystemMonitor
 from oopsys_agent.services.nats import NatsGateway
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from structlog import getLogger
 
 logger = getLogger(Loggers.monitor.name)
 
@@ -55,21 +54,31 @@ class AgentScheduler:
         await logger.ainfo("scheduler stopped")
 
     def _events(self, session: AsyncSession) -> EventService:
-        return EventService(session, self._gateway, subject_prefix=self._cfg.nats.subject_prefix)
+        return EventService(
+            session, self._gateway, subject_prefix=self._cfg.nats.subject_prefix
+        )
 
-    async def _guard(self, component: str, operation: str, func: Callable[[], Awaitable[None]]) -> None:
+    async def _guard(
+        self, component: str, operation: str, func: Callable[[], Awaitable[None]]
+    ) -> None:
         try:
             await func()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await logger.aerror("agent fault", component=component, operation=operation, error=str(exc))
-            await self._record_fault(AgentFault.from_exception(exc, component=component, operation=operation))
+            await logger.aerror(
+                "agent fault", component=component, operation=operation, error=str(exc)
+            )
+            await self._record_fault(
+                AgentFault.from_exception(exc, component=component, operation=operation)
+            )
 
     async def _record_fault(self, fault: AgentFault) -> None:
         try:
             async with self._session_factory() as session:
-                await self._events(session).record_agent_fault(fault, agent_id=self._runtime.agent_id)
+                await self._events(session).record_agent_fault(
+                    fault, agent_id=self._runtime.agent_id
+                )
         except Exception as exc:
             await logger.aerror("failed to record agent fault", error=str(exc))
 
@@ -81,7 +90,9 @@ class AgentScheduler:
     async def _collect_once(self) -> None:
         metrics = self._system.collect_server_metrics()
         async with self._session_factory() as session:
-            await self._events(session).record_server_metrics(metrics, agent_id=self._runtime.agent_id)
+            await self._events(session).record_server_metrics(
+                metrics, agent_id=self._runtime.agent_id
+            )
         self._runtime.last_metrics_at = utc_now()
 
         if not self._docker.available:
@@ -91,8 +102,9 @@ class AgentScheduler:
 
         if self._docker.available:
             states = await self._docker.collect()
+            snapshot = ContainerSnapshot(captured_at=utc_now(), containers=states)
             async with self._session_factory() as session:
-                events = self._events(session)
-                for state in states:
-                    await events.record_container_state(state, agent_id=self._runtime.agent_id)
+                await self._events(session).record_container_snapshot(
+                    snapshot, agent_id=self._runtime.agent_id
+                )
             await logger.adebug("containers collected", count=len(states))
