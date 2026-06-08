@@ -60,3 +60,14 @@ async def test_forward_marks_server_reachable_on_success() -> None:
 
     assert runtime.server_reachable is True
     assert gateway._forward_unreachable_logged is False
+
+
+async def test_connect_once_fails_fast_on_unreachable_server() -> None:
+    gateway = _gateway()
+    gateway._config = NatsModel(servers=["nats://does-not-exist:4222"], connect_timeout=1.0)
+
+    ok = await gateway._connect_once()
+
+    assert ok is False
+    assert gateway._runtime.queue_connected is False
+    assert gateway._broker is None

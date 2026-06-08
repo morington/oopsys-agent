@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 from typing import Any
 
@@ -33,9 +34,11 @@ class NatsGateway:
         self._runtime = runtime
         self._retry_base = retry_base
         self._broker: NatsBroker | None = None
+        self._retry_task: asyncio.Task | None = None
         self._forward_no_token_logged = False
         self._forward_auth_logged = False
         self._forward_unreachable_logged = False
+        self._connect_failed_logged = False
 
     def _stream(self) -> JStream:
         return JStream(
@@ -48,6 +51,7 @@ class NatsGateway:
         broker = NatsBroker(
             self._config.servers,
             connect_timeout=int(self._config.connect_timeout),
+            max_reconnect_attempts=1,
             logger=None,
         )
         stream = self._stream()
@@ -101,7 +105,7 @@ class NatsGateway:
         self._runtime.server_reachable = True
         self._runtime.last_forwarded_at = utc_now()
 
-    async def start(self) -> bool:
+    async def _connect_once(self) -> bool:
         await self._safe_close()
         broker = self._build_broker()
         try:
@@ -111,12 +115,37 @@ class NatsGateway:
             self._runtime.queue_connected = False
             with contextlib.suppress(Exception):
                 await broker.stop()
-            await logger.awarning("nats connect failed", reason=str(exc))
+            if not self._connect_failed_logged:
+                hint = (
+                    "check NATS__SERVERS matches the docker-compose service name "
+                    "(expected nats://oopsys-nats:4222)"
+                )
+                await logger.awarning(
+                    "nats connect failed",
+                    servers=self._config.servers,
+                    reason=str(exc),
+                    hint=hint,
+                )
+                self._connect_failed_logged = True
             return False
         self._broker = broker
         self._runtime.queue_connected = True
+        self._connect_failed_logged = False
         await logger.ainfo("nats queue ready", servers=self._config.servers, stream=self._config.stream)
         return True
+
+    async def _retry_loop(self) -> None:
+        while True:
+            if await self._connect_once():
+                return
+            await asyncio.sleep(self._retry_base)
+
+    async def start(self) -> bool:
+        connected = await self._connect_once()
+        if connected:
+            return True
+        self._retry_task = asyncio.create_task(self._retry_loop(), name="oopsys-nats-retry")
+        return False
 
     async def publish(self, subject: str, payload: dict[str, Any]) -> bool:
         if self._broker is None:
@@ -141,5 +170,10 @@ class NatsGateway:
         self._broker = None
 
     async def close(self) -> None:
+        if self._retry_task is not None:
+            self._retry_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._retry_task
+            self._retry_task = None
         await self._safe_close()
         self._runtime.queue_connected = False

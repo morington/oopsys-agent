@@ -43,7 +43,10 @@ async def lifespan(app: FastAPI):
         )
 
     gateway: NatsGateway = await container.get(NatsGateway)
-    await gateway.start()
+    if not await gateway.start():
+        await logger.awarning(
+            "local NATS queue unavailable; metrics will retry in background until connected",
+        )
 
     scheduler: AgentScheduler = await container.get(AgentScheduler)
     await scheduler.start()
