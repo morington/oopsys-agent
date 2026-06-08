@@ -14,7 +14,7 @@ services:
     networks:
       - oopsys
     depends_on:
-      nats:
+      oopsys-nats:
         condition: service_healthy
 
   oopsys-nats:
